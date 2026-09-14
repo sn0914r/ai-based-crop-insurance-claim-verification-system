@@ -1,0 +1,20 @@
+services:
+  crop-insurance-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crop-insurance-server
+    ports:
+      - "${PORT:-8000}:${PORT:-8000}"
+    env_file:
+      - .env
+    volumes:
+      - ./models_saved:/app/models_saved
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8000}/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
