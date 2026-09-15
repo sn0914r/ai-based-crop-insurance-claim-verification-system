@@ -8,3 +8,5 @@ dataset/
 client/
 .agent/
 docs/
+server/data/
+*.pkl

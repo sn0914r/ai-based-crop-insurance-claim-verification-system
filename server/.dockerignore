@@ -17,4 +17,4 @@ Thumbs.db
 *.sqlite3
 *.db
 
-experiments/
+training/
