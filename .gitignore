@@ -8,5 +8,6 @@ dataset/
 client/
 .agent/
 docs/
-server/data/
+server/data/*
+!server/data/weather_dataset.csv
 *.pkl

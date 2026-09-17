@@ -1,4 +1,4 @@
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Dict
 from pydantic import BaseModel, Field, model_validator
 
 class SingleImageAssessment(BaseModel):
@@ -13,6 +13,9 @@ class SubmitClaimRequest(BaseModel):
     farmerId: str = Field(..., description="Unique ID of the farmer submitting the claim", example="FARMER_102")
     cropType: str = Field(..., description="Type of crop: rice, wheat, corn", example="rice")
     claimedDamage: float = Field(..., ge=0.0, le=100.0, description="Farmer self-reported damage percentage (0-100)", example=65.0)
+    latitude: Optional[float] = Field(None, description="GPS latitude of the agricultural field", example=16.5)
+    longitude: Optional[float] = Field(None, description="GPS longitude of the agricultural field", example=80.6)
+    incidentDate: Optional[str] = Field(None, description="Disaster or claim date (YYYY-MM-DD)", example="2024-09-02")
     image: Optional[str] = Field(None, description="Single base64-encoded crop photograph")
     images: Optional[List[str]] = Field(None, description="List of base64-encoded crop photographs from different angles or field spots")
 
@@ -46,9 +49,14 @@ class ClaimResponseData(BaseModel):
     farmerId: str
     cropType: str
     claimedDamage: float
-    imagePath: Optional[str]
+    imagePath: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    incidentDate: Optional[str] = None
     status: str
+    damageCause: Optional[str] = None
     visualAssessment: Optional[VisualAssessmentData] = None
+    weatherAssessment: Optional[Dict[str, Any]] = None
     createdAt: Optional[str] = None
 
 class StandardResponse(BaseModel):

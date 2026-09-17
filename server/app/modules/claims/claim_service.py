@@ -4,10 +4,14 @@ import random
 from typing import Dict, Any, List
 from sqlalchemy.orm import Session
 
+from datetime import datetime
 from app.db.models import Claim, ClaimAssessment, AuditLog
 from app.modules.claims.claim_repository import claim_repository
 from app.modules.claims.claim_schema import SubmitClaimRequest
 from app.providers.ml_provider import ml_provider
+from app.providers.weather_provider import weather_provider
+from app.core.weather_engine import weather_engine
+from app.core.multimodal_engine import multimodal_engine
 from app.errors.app_error import AppError
 import app.errors.error_codes as error_codes
 
@@ -25,12 +29,15 @@ class ClaimService:
     def process_new_claim(cls, db: Session, request: SubmitClaimRequest) -> Dict[str, Any]:
         claim_id = cls.generate_claim_id()
 
-        # 1. Create initial claim record
+        # 1. Create initial claim record with location and disaster date
         claim = Claim(
             claim_id=claim_id,
             farmer_id=request.farmerId.strip(),
             crop_type=request.cropType.lower().strip(),
             claimed_damage=float(request.claimedDamage),
+            latitude=request.latitude,
+            longitude=request.longitude,
+            incident_date=request.incidentDate,
             status="EVALUATING"
         )
         claim = claim_repository.create_claim(db, claim)
@@ -43,7 +50,10 @@ class ClaimService:
             details=json.dumps({
                 "farmerId": request.farmerId,
                 "cropType": request.cropType,
-                "claimedDamage": request.claimedDamage
+                "claimedDamage": request.claimedDamage,
+                "latitude": request.latitude,
+                "longitude": request.longitude,
+                "incidentDate": request.incidentDate
             })
         )
         claim_repository.create_audit_log(db, submission_log)
@@ -52,16 +62,39 @@ class ClaimService:
         images = request.get_image_list()
         assessment_result = ml_provider.assess_crop_images(images, claim_id)
 
-        # 4. Save assessment record
+        # 4. Execute weather evaluation & multimodal fusion if location provided
+        weather_assessment = None
+        damage_cause = "NORMAL" if assessment_result["visualClass"] == "HEALTHY" else "DAMAGED"
+
+        if request.latitude is not None and request.longitude is not None:
+            incident_dt = request.incidentDate or datetime.utcnow().strftime("%Y-%m-%d")
+            raw_weather = weather_provider.get_weather_data(
+                latitude=request.latitude,
+                longitude=request.longitude,
+                incident_date=incident_dt
+            )
+            weather_assessment = weather_engine.evaluate_weather(weather_data=raw_weather)
+            fusion_result = multimodal_engine.fuse_assessments(
+                visual_damage=assessment_result["damageSeverity"],
+                weather_assessment=weather_assessment
+            )
+            damage_cause = fusion_result["damageCause"]
+            weather_assessment["damageCause"] = damage_cause
+            weather_assessment["consistencyNote"] = fusion_result.get("consistencyNote")
+
+        # 5. Save assessment record (combining visual + weather metrics)
         assessment = ClaimAssessment(
             claim_id=claim_id,
             visual_class=assessment_result["visualClass"],
             damage_severity=assessment_result["damageSeverity"],
-            confidence=assessment_result["confidence"]
+            confidence=assessment_result["confidence"],
+            weather_score=weather_assessment["weatherScore"] if weather_assessment else None,
+            damage_cause=damage_cause,
+            weather_details=json.dumps(weather_assessment) if weather_assessment else None
         )
         claim_repository.save_assessment(db, assessment)
 
-        # 5. Update claim with primary image path and ASSESSED status
+        # 6. Update claim with primary image path and ASSESSED status
         primary_image_path = assessment_result.get("imagePath")
         claim = claim_repository.update_claim_status(
             db,
@@ -70,7 +103,7 @@ class ClaimService:
             image_path=primary_image_path
         )
 
-        # 6. Record assessment completion in audit log
+        # 7. Record assessment completion in audit log
         assessment_log = AuditLog(
             claim_id=claim_id,
             event_type="VISION_ASSESSED",
@@ -86,14 +119,32 @@ class ClaimService:
         )
         claim_repository.create_audit_log(db, assessment_log)
 
-        # 7. Return complete claim response
+        if weather_assessment:
+            weather_log = AuditLog(
+                claim_id=claim_id,
+                event_type="WEATHER_VERIFIED",
+                actor="SYSTEM",
+                details=json.dumps({
+                    "weatherScore": weather_assessment["weatherScore"],
+                    "damageCause": damage_cause,
+                    "anomalyDetected": weather_assessment["anomalyDetected"],
+                    "dataSource": weather_assessment.get("dataSource")
+                })
+            )
+            claim_repository.create_audit_log(db, weather_log)
+
+        # 8. Return complete multimodal claim response
         return {
             "claimId": claim.claim_id,
             "farmerId": claim.farmer_id,
             "cropType": claim.crop_type,
             "claimedDamage": claim.claimed_damage,
+            "latitude": claim.latitude,
+            "longitude": claim.longitude,
+            "incidentDate": claim.incident_date,
             "imagePath": claim.image_path,
             "status": claim.status,
+            "damageCause": damage_cause,
             "visualAssessment": {
                 "visualClass": assessment.visual_class,
                 "damageSeverity": assessment.damage_severity,
@@ -104,6 +155,7 @@ class ClaimService:
                 "rawProbability": assessment_result.get("rawProbability"),
                 "imagePath": claim.image_path
             },
+            "weatherAssessment": weather_assessment,
             "createdAt": claim.created_at.isoformat() if claim.created_at else None
         }
 

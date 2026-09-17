@@ -21,9 +21,11 @@ def submit_claim(
     stores records and audit logs in SQLite, and returns assessment results.
     """
     result = claim_service.process_new_claim(db, request)
+    has_weather = bool(result.get("weatherAssessment"))
+    message = "Claim submitted and verified with multimodal evidence successfully." if has_weather else "Claim submitted and visually assessed successfully."
     return StandardResponse(
         success=True,
-        message="Claim submitted and visually assessed successfully.",
+        message=message,
         data=result
     )
 

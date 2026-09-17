@@ -10,6 +10,7 @@ from app.db.session import init_db
 from app.errors.app_error import AppError
 import app.errors.error_codes as error_codes
 from app.modules.claims.claim_routes import router as claims_router
+from app.modules.weather import weather_router
 from app.core.vision_engine import VisionEngine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -85,6 +86,7 @@ app.mount("/uploads", StaticFiles(directory=str(uploads_path)), name="uploads")
 
 # Register routers
 app.include_router(claims_router)
+app.include_router(weather_router)
 
 @app.get("/health", tags=["System"])
 def health_check():
