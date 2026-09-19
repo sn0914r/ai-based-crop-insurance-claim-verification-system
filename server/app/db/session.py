@@ -45,6 +45,8 @@ def init_db():
                 conn.execute(text("ALTER TABLE claims ADD COLUMN longitude REAL"))
             if "incident_date" not in claim_cols:
                 conn.execute(text("ALTER TABLE claims ADD COLUMN incident_date TEXT"))
+            if "field_boundary" not in claim_cols:
+                conn.execute(text("ALTER TABLE claims ADD COLUMN field_boundary TEXT"))
 
             # Check claim_assessments columns
             assessment_info = conn.execute(text("PRAGMA table_info(claim_assessments)")).fetchall()
@@ -55,6 +57,12 @@ def init_db():
                 conn.execute(text("ALTER TABLE claim_assessments ADD COLUMN damage_cause TEXT"))
             if "weather_details" not in assessment_cols:
                 conn.execute(text("ALTER TABLE claim_assessments ADD COLUMN weather_details TEXT"))
+            if "satellite_score" not in assessment_cols:
+                conn.execute(text("ALTER TABLE claim_assessments ADD COLUMN satellite_score REAL"))
+            if "damaged_area_percentage" not in assessment_cols:
+                conn.execute(text("ALTER TABLE claim_assessments ADD COLUMN damaged_area_percentage REAL"))
+            if "satellite_details" not in assessment_cols:
+                conn.execute(text("ALTER TABLE claim_assessments ADD COLUMN satellite_details TEXT"))
             conn.commit()
     except Exception:
         pass

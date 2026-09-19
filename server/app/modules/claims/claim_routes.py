@@ -22,7 +22,13 @@ def submit_claim(
     """
     result = claim_service.process_new_claim(db, request)
     has_weather = bool(result.get("weatherAssessment"))
-    message = "Claim submitted and verified with multimodal evidence successfully." if has_weather else "Claim submitted and visually assessed successfully."
+    has_satellite = bool(result.get("satelliteAssessment"))
+    if has_weather and has_satellite:
+        message = "Claim submitted and verified with multimodal vision, weather, and satellite evidence successfully."
+    elif has_weather:
+        message = "Claim submitted and verified with multimodal evidence successfully."
+    else:
+        message = "Claim submitted and visually assessed successfully."
     return StandardResponse(
         success=True,
         message=message,

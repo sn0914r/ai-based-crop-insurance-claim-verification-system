@@ -10,7 +10,9 @@ from app.modules.claims.claim_repository import claim_repository
 from app.modules.claims.claim_schema import SubmitClaimRequest
 from app.providers.ml_provider import ml_provider
 from app.providers.weather_provider import weather_provider
+from app.providers.satellite_provider import satellite_provider, SatelliteProvider
 from app.core.weather_engine import weather_engine
+from app.core.satellite_engine import satellite_engine
 from app.core.multimodal_engine import multimodal_engine
 from app.errors.app_error import AppError
 import app.errors.error_codes as error_codes
@@ -29,15 +31,23 @@ class ClaimService:
     def process_new_claim(cls, db: Session, request: SubmitClaimRequest) -> Dict[str, Any]:
         claim_id = cls.generate_claim_id()
 
-        # 1. Create initial claim record with location and disaster date
+        # Calculate representative latitude and longitude if polygon is provided
+        calc_lat = request.latitude
+        calc_lon = request.longitude
+        if (calc_lat is None or calc_lon is None) and request.fieldBoundary and len(request.fieldBoundary) >= 3:
+            calc_lat, calc_lon = SatelliteProvider.calculate_centroid(request.fieldBoundary)
+
+        # 1. Create initial claim record with location, field boundary, and disaster date
+        field_boundary_str = json.dumps(request.fieldBoundary) if request.fieldBoundary else None
         claim = Claim(
             claim_id=claim_id,
             farmer_id=request.farmerId.strip(),
             crop_type=request.cropType.lower().strip(),
             claimed_damage=float(request.claimedDamage),
-            latitude=request.latitude,
-            longitude=request.longitude,
+            latitude=calc_lat,
+            longitude=calc_lon,
             incident_date=request.incidentDate,
+            field_boundary=field_boundary_str,
             status="EVALUATING"
         )
         claim = claim_repository.create_claim(db, claim)
@@ -51,9 +61,10 @@ class ClaimService:
                 "farmerId": request.farmerId,
                 "cropType": request.cropType,
                 "claimedDamage": request.claimedDamage,
-                "latitude": request.latitude,
-                "longitude": request.longitude,
-                "incidentDate": request.incidentDate
+                "latitude": calc_lat,
+                "longitude": calc_lon,
+                "incidentDate": request.incidentDate,
+                "hasFieldBoundary": bool(request.fieldBoundary)
             })
         )
         claim_repository.create_audit_log(db, submission_log)
@@ -62,15 +73,15 @@ class ClaimService:
         images = request.get_image_list()
         assessment_result = ml_provider.assess_crop_images(images, claim_id)
 
-        # 4. Execute weather evaluation & multimodal fusion if location provided
+        # 4. Execute weather evaluation & multimodal fusion if location available
         weather_assessment = None
         damage_cause = "NORMAL" if assessment_result["visualClass"] == "HEALTHY" else "DAMAGED"
+        incident_dt = request.incidentDate or datetime.utcnow().strftime("%Y-%m-%d")
 
-        if request.latitude is not None and request.longitude is not None:
-            incident_dt = request.incidentDate or datetime.utcnow().strftime("%Y-%m-%d")
+        if calc_lat is not None and calc_lon is not None:
             raw_weather = weather_provider.get_weather_data(
-                latitude=request.latitude,
-                longitude=request.longitude,
+                latitude=calc_lat,
+                longitude=calc_lon,
                 incident_date=incident_dt
             )
             weather_assessment = weather_engine.evaluate_weather(weather_data=raw_weather)
@@ -82,7 +93,19 @@ class ClaimService:
             weather_assessment["damageCause"] = damage_cause
             weather_assessment["consistencyNote"] = fusion_result.get("consistencyNote")
 
-        # 5. Save assessment record (combining visual + weather metrics)
+        # 5. Execute satellite remote sensing if field boundary polygon is provided
+        satellite_assessment = None
+        if request.fieldBoundary and len(request.fieldBoundary) >= 3:
+            raw_satellite = satellite_provider.get_satellite_data(
+                field_boundary=request.fieldBoundary,
+                incident_date=incident_dt
+            )
+            satellite_assessment = satellite_engine.evaluate_field(
+                field_boundary=request.fieldBoundary,
+                satellite_data=raw_satellite
+            )
+
+        # 6. Save assessment record (combining visual + weather + satellite metrics)
         assessment = ClaimAssessment(
             claim_id=claim_id,
             visual_class=assessment_result["visualClass"],
@@ -90,11 +113,14 @@ class ClaimService:
             confidence=assessment_result["confidence"],
             weather_score=weather_assessment["weatherScore"] if weather_assessment else None,
             damage_cause=damage_cause,
-            weather_details=json.dumps(weather_assessment) if weather_assessment else None
+            weather_details=json.dumps(weather_assessment) if weather_assessment else None,
+            satellite_score=satellite_assessment["satelliteScore"] if satellite_assessment else None,
+            damaged_area_percentage=satellite_assessment["damagedAreaPercentage"] if satellite_assessment else None,
+            satellite_details=json.dumps(satellite_assessment) if satellite_assessment else None
         )
         claim_repository.save_assessment(db, assessment)
 
-        # 6. Update claim with primary image path and ASSESSED status
+        # 7. Update claim with primary image path and ASSESSED status
         primary_image_path = assessment_result.get("imagePath")
         claim = claim_repository.update_claim_status(
             db,
@@ -103,7 +129,7 @@ class ClaimService:
             image_path=primary_image_path
         )
 
-        # 7. Record assessment completion in audit log
+        # 8. Record audit logs
         assessment_log = AuditLog(
             claim_id=claim_id,
             event_type="VISION_ASSESSED",
@@ -133,7 +159,25 @@ class ClaimService:
             )
             claim_repository.create_audit_log(db, weather_log)
 
-        # 8. Return complete multimodal claim response
+        if satellite_assessment:
+            satellite_log = AuditLog(
+                claim_id=claim_id,
+                event_type="SATELLITE_VERIFIED",
+                actor="SYSTEM",
+                details=json.dumps({
+                    "preDisasterNdvi": satellite_assessment["preDisasterNdvi"],
+                    "postDisasterNdvi": satellite_assessment["postDisasterNdvi"],
+                    "ndviDrop": satellite_assessment["ndviDrop"],
+                    "damagedAreaPercentage": satellite_assessment["damagedAreaPercentage"],
+                    "satelliteScore": satellite_assessment["satelliteScore"],
+                    "damageClassification": satellite_assessment["damageClassification"],
+                    "fieldAreaHectares": satellite_assessment["fieldAreaHectares"],
+                    "dataSource": satellite_assessment["dataSource"]
+                })
+            )
+            claim_repository.create_audit_log(db, satellite_log)
+
+        # 9. Return complete multimodal claim response
         return {
             "claimId": claim.claim_id,
             "farmerId": claim.farmer_id,
@@ -142,6 +186,7 @@ class ClaimService:
             "latitude": claim.latitude,
             "longitude": claim.longitude,
             "incidentDate": claim.incident_date,
+            "fieldBoundary": request.fieldBoundary,
             "imagePath": claim.image_path,
             "status": claim.status,
             "damageCause": damage_cause,
@@ -156,6 +201,7 @@ class ClaimService:
                 "imagePath": claim.image_path
             },
             "weatherAssessment": weather_assessment,
+            "satelliteAssessment": satellite_assessment,
             "createdAt": claim.created_at.isoformat() if claim.created_at else None
         }
 
@@ -174,6 +220,8 @@ class ClaimService:
 
         claim_data = claim.to_dict()
         claim_data["visualAssessment"] = assessment_data
+        claim_data["weatherAssessment"] = assessment_data.get("weatherDetails") if assessment_data else None
+        claim_data["satelliteAssessment"] = assessment_data.get("satelliteDetails") if assessment_data else None
         claim_data["auditLogs"] = [log.to_dict() for log in claim.audit_logs]
         return claim_data
 

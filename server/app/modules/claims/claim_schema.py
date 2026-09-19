@@ -16,15 +16,36 @@ class SubmitClaimRequest(BaseModel):
     latitude: Optional[float] = Field(None, description="GPS latitude of the agricultural field", example=16.5)
     longitude: Optional[float] = Field(None, description="GPS longitude of the agricultural field", example=80.6)
     incidentDate: Optional[str] = Field(None, description="Disaster or claim date (YYYY-MM-DD)", example="2024-09-02")
+    fieldBoundary: Optional[List[List[float]]] = Field(
+        None,
+        description="List of GPS coordinate pairs [[latitude, longitude], ...] defining the field boundary (at least 3 vertices required)",
+        example=[[16.501, 80.601], [16.505, 80.601], [16.505, 80.607], [16.501, 80.607]]
+    )
     image: Optional[str] = Field(None, description="Single base64-encoded crop photograph")
     images: Optional[List[str]] = Field(None, description="List of base64-encoded crop photographs from different angles or field spots")
 
     @model_validator(mode="after")
-    def validate_images(self):
+    def validate_request_inputs(self):
         has_single = bool(self.image and len(self.image.strip()) > 0)
         has_multiple = bool(self.images and len(self.images) > 0)
         if not has_single and not has_multiple:
             raise ValueError("At least one crop image must be provided using 'image' or 'images'.")
+
+        if self.fieldBoundary is not None:
+            if len(self.fieldBoundary) < 3:
+                raise ValueError(
+                    "fieldBoundary must contain at least 3 GPS coordinate vertices [[latitude, longitude], ...]."
+                )
+            for idx, pt in enumerate(self.fieldBoundary):
+                if not isinstance(pt, (list, tuple)) or len(pt) < 2:
+                    raise ValueError(
+                        f"Vertex at index {idx} in fieldBoundary is invalid. Each vertex must be a [latitude, longitude] pair."
+                    )
+                lat, lon = pt[0], pt[1]
+                if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
+                    raise ValueError(
+                        f"Vertex at index {idx} has out-of-range coordinates ({lat}, {lon})."
+                    )
         return self
 
     def get_image_list(self) -> List[str]:
@@ -53,10 +74,12 @@ class ClaimResponseData(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     incidentDate: Optional[str] = None
+    fieldBoundary: Optional[List[List[float]]] = None
     status: str
     damageCause: Optional[str] = None
     visualAssessment: Optional[VisualAssessmentData] = None
     weatherAssessment: Optional[Dict[str, Any]] = None
+    satelliteAssessment: Optional[Dict[str, Any]] = None
     createdAt: Optional[str] = None
 
 class StandardResponse(BaseModel):

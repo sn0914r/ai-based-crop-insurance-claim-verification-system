@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+from typing import Optional
 from pydantic_settings import BaseSettings
 
 # Absolute path to the server directory
@@ -13,6 +14,11 @@ class Settings(BaseSettings):
     FRAUD_MODEL_PATH: str = str(SERVER_DIR / "models_saved" / "xgboost_fraud.pkl")
     SHAP_EXPLAINER_PATH: str = str(SERVER_DIR / "models_saved" / "shap_explainer.pkl")
     UPLOADS_DIR: str = str(SERVER_DIR / "data" / "uploads")
+
+    # Satellite Remote Sensing (loaded dynamically from .env file)
+    SENTINEL_STAC_URL: Optional[str] = None
+    SENTINEL_COLLECTION: Optional[str] = None
+    SENTINEL_API_KEY: Optional[str] = None
 
     class Config:
         env_file = str(SERVER_DIR / ".env")

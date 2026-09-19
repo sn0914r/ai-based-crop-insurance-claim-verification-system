@@ -15,6 +15,7 @@ class Claim(Base):
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
     incident_date = Column(String(20), nullable=True)
+    field_boundary = Column(Text, nullable=True)
     status = Column(String(50), default="EVALUATING", nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -23,6 +24,14 @@ class Claim(Base):
     audit_logs = relationship("AuditLog", back_populates="claim", cascade="all, delete-orphan")
 
     def to_dict(self):
+        import json
+        parsed_boundary = None
+        if self.field_boundary:
+            try:
+                parsed_boundary = json.loads(self.field_boundary)
+            except Exception:
+                parsed_boundary = None
+
         return {
             "id": self.id,
             "claimId": self.claim_id,
@@ -33,6 +42,7 @@ class Claim(Base):
             "latitude": self.latitude,
             "longitude": self.longitude,
             "incidentDate": self.incident_date,
+            "fieldBoundary": parsed_boundary,
             "status": self.status,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
             "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
@@ -49,6 +59,9 @@ class ClaimAssessment(Base):
     weather_score = Column(Float, nullable=True)
     damage_cause = Column(String(50), nullable=True)
     weather_details = Column(Text, nullable=True)
+    satellite_score = Column(Float, nullable=True)
+    damaged_area_percentage = Column(Float, nullable=True)
+    satellite_details = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     claim = relationship("Claim", back_populates="assessments")
@@ -62,6 +75,13 @@ class ClaimAssessment(Base):
             except Exception:
                 parsed_details = self.weather_details
 
+        parsed_satellite = None
+        if self.satellite_details:
+            try:
+                parsed_satellite = json.loads(self.satellite_details)
+            except Exception:
+                parsed_satellite = self.satellite_details
+
         return {
             "id": self.id,
             "claimId": self.claim_id,
@@ -71,6 +91,9 @@ class ClaimAssessment(Base):
             "weatherScore": self.weather_score,
             "damageCause": self.damage_cause,
             "weatherDetails": parsed_details,
+            "satelliteScore": self.satellite_score,
+            "damagedAreaPercentage": self.damaged_area_percentage,
+            "satelliteDetails": parsed_satellite,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
         }
 
