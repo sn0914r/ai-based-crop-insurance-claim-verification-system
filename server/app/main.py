@@ -12,7 +12,9 @@ import app.errors.error_codes as error_codes
 from app.modules.claims.claim_routes import router as claims_router
 from app.modules.weather import weather_router
 from app.modules.satellite import satellite_router
+from app.modules.fraud import fraud_router
 from app.core.vision_engine import VisionEngine
+from app.core.fraud_engine import fraud_engine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -31,6 +33,15 @@ async def lifespan(app: FastAPI):
         logger.info("MobileNetV2 vision model loaded successfully.")
     except Exception as e:
         logger.warning(f"Vision model preload notice: {str(e)}")
+
+    # Preload XGBoost fraud model
+    try:
+        if fraud_engine.model is not None:
+            logger.info("XGBoost multimodal fraud model initialized successfully.")
+        else:
+            logger.warning("XGBoost fraud model initialized with fallback heuristics.")
+    except Exception as e:
+        logger.warning(f"Fraud model preload notice: {str(e)}")
 
     yield
 
@@ -89,6 +100,7 @@ app.mount("/uploads", StaticFiles(directory=str(uploads_path)), name="uploads")
 app.include_router(claims_router)
 app.include_router(weather_router)
 app.include_router(satellite_router)
+app.include_router(fraud_router)
 
 @app.get("/health", tags=["System"])
 def health_check():

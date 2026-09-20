@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey
 from sqlalchemy.orm import relationship
@@ -12,6 +13,7 @@ class Claim(Base):
     crop_type = Column(String(50), nullable=False)
     claimed_damage = Column(Float, nullable=False)
     image_path = Column(String(255), nullable=True)
+    image_hash = Column(String(64), nullable=True, index=True)
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
     incident_date = Column(String(20), nullable=True)
@@ -24,7 +26,6 @@ class Claim(Base):
     audit_logs = relationship("AuditLog", back_populates="claim", cascade="all, delete-orphan")
 
     def to_dict(self):
-        import json
         parsed_boundary = None
         if self.field_boundary:
             try:
@@ -39,6 +40,7 @@ class Claim(Base):
             "cropType": self.crop_type,
             "claimedDamage": self.claimed_damage,
             "imagePath": self.image_path,
+            "imageHash": self.image_hash,
             "latitude": self.latitude,
             "longitude": self.longitude,
             "incidentDate": self.incident_date,
@@ -62,12 +64,16 @@ class ClaimAssessment(Base):
     satellite_score = Column(Float, nullable=True)
     damaged_area_percentage = Column(Float, nullable=True)
     satellite_details = Column(Text, nullable=True)
+    fraud_risk_score = Column(Float, nullable=True)
+    fraud_risk_level = Column(String(50), nullable=True)
+    decision = Column(String(50), nullable=True)
+    recommended_payout = Column(Float, nullable=True)
+    fraud_flags = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     claim = relationship("Claim", back_populates="assessments")
 
     def to_dict(self):
-        import json
         parsed_details = None
         if self.weather_details:
             try:
@@ -82,6 +88,13 @@ class ClaimAssessment(Base):
             except Exception:
                 parsed_satellite = self.satellite_details
 
+        parsed_flags = None
+        if self.fraud_flags:
+            try:
+                parsed_flags = json.loads(self.fraud_flags)
+            except Exception:
+                parsed_flags = self.fraud_flags
+
         return {
             "id": self.id,
             "claimId": self.claim_id,
@@ -94,6 +107,11 @@ class ClaimAssessment(Base):
             "satelliteScore": self.satellite_score,
             "damagedAreaPercentage": self.damaged_area_percentage,
             "satelliteDetails": parsed_satellite,
+            "fraudRiskScore": self.fraud_risk_score,
+            "fraudRiskLevel": self.fraud_risk_level,
+            "decision": self.decision,
+            "recommendedPayout": self.recommended_payout,
+            "fraudFlags": parsed_flags,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -110,11 +128,18 @@ class AuditLog(Base):
     claim = relationship("Claim", back_populates="audit_logs")
 
     def to_dict(self):
+        parsed_details = None
+        if self.details:
+            try:
+                parsed_details = json.loads(self.details)
+            except Exception:
+                parsed_details = self.details
+
         return {
             "id": self.id,
             "claimId": self.claim_id,
             "eventType": self.event_type,
             "actor": self.actor,
-            "details": self.details,
+            "details": parsed_details,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
         }

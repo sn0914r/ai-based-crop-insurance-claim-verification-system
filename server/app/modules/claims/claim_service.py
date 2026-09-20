@@ -3,8 +3,8 @@ import time
 import random
 from typing import Dict, Any, List
 from sqlalchemy.orm import Session
-
 from datetime import datetime
+
 from app.db.models import Claim, ClaimAssessment, AuditLog
 from app.modules.claims.claim_repository import claim_repository
 from app.modules.claims.claim_schema import SubmitClaimRequest
@@ -14,12 +14,16 @@ from app.providers.satellite_provider import satellite_provider, SatelliteProvid
 from app.core.weather_engine import weather_engine
 from app.core.satellite_engine import satellite_engine
 from app.core.multimodal_engine import multimodal_engine
+from app.core.image_hash import image_hasher
+from app.core.fraud_engine import fraud_engine
+from app.core.claim_decision_engine import claim_decision_engine
 from app.errors.app_error import AppError
 import app.errors.error_codes as error_codes
 
 class ClaimService:
     """
-    Business service orchestrating claim intake, AI assessment, and persistence.
+    Business service orchestrating claim intake, multimodal AI assessment,
+    perceptual image hashing, fraud detection, and persistence.
     """
     @staticmethod
     def generate_claim_id() -> str:
@@ -69,11 +73,23 @@ class ClaimService:
         )
         claim_repository.create_audit_log(db, submission_log)
 
-        # 3. Execute vision assessment via ML provider on all uploaded photos
+        # 3. Stage 1: Execute vision assessment via ML provider on all uploaded photos
         images = request.get_image_list()
         assessment_result = ml_provider.assess_crop_images(images, claim_id)
 
-        # 4. Execute weather evaluation & multimodal fusion if location available
+        # Compute perceptual image hash of the primary photo to check for duplicate recycled images
+        primary_image_hash = image_hasher.compute_dhash(images[0])
+        duplicate_match = claim_repository.find_duplicate_image(
+            db=db,
+            target_hash=primary_image_hash,
+            exclude_claim_id=claim_id
+        )
+        is_duplicate = bool(duplicate_match is not None)
+
+        # Query past claims frequency for this farmer in the last 12 months
+        farmer_claim_count = claim_repository.count_farmer_claims_12m(db, request.farmerId.strip())
+
+        # 4. Stage 2: Execute weather evaluation & cause classification if location available
         weather_assessment = None
         damage_cause = "NORMAL" if assessment_result["visualClass"] == "HEALTHY" else "DAMAGED"
         incident_dt = request.incidentDate or datetime.utcnow().strftime("%Y-%m-%d")
@@ -93,7 +109,7 @@ class ClaimService:
             weather_assessment["damageCause"] = damage_cause
             weather_assessment["consistencyNote"] = fusion_result.get("consistencyNote")
 
-        # 5. Execute satellite remote sensing if field boundary polygon is provided
+        # 5. Stage 3: Execute satellite remote sensing if field boundary polygon is provided
         satellite_assessment = None
         if request.fieldBoundary and len(request.fieldBoundary) >= 3:
             raw_satellite = satellite_provider.get_satellite_data(
@@ -105,7 +121,19 @@ class ClaimService:
                 satellite_data=raw_satellite
             )
 
-        # 6. Save assessment record (combining visual + weather + satellite metrics)
+        # 6. Stage 4: Execute Multimodal AI Fusion and Fraud Detection Engine (XGBoost)
+        fraud_result = fraud_engine.evaluate(
+            claimed_damage=claim.claimed_damage,
+            visual_damage=assessment_result["damageSeverity"],
+            weather_score=weather_assessment["weatherScore"] if weather_assessment else None,
+            weather_hazard=weather_assessment.get("weatherHazard") if weather_assessment else None,
+            satellite_damaged_area=satellite_assessment["damagedAreaPercentage"] if satellite_assessment else None,
+            ndvi_vegetation_drop=satellite_assessment["ndviDrop"] if satellite_assessment else None,
+            is_duplicate_image=is_duplicate,
+            claims_frequency_12m=farmer_claim_count
+        )
+
+        # 7. Save assessment record combining all 4 stages of evidence
         assessment = ClaimAssessment(
             claim_id=claim_id,
             visual_class=assessment_result["visualClass"],
@@ -116,20 +144,26 @@ class ClaimService:
             weather_details=json.dumps(weather_assessment) if weather_assessment else None,
             satellite_score=satellite_assessment["satelliteScore"] if satellite_assessment else None,
             damaged_area_percentage=satellite_assessment["damagedAreaPercentage"] if satellite_assessment else None,
-            satellite_details=json.dumps(satellite_assessment) if satellite_assessment else None
+            satellite_details=json.dumps(satellite_assessment) if satellite_assessment else None,
+            fraud_risk_score=fraud_result["fraudRiskScore"],
+            fraud_risk_level=fraud_result["fraudRiskLevel"],
+            decision=fraud_result["decision"],
+            recommended_payout=fraud_result["recommendedPayout"],
+            fraud_flags=json.dumps(fraud_result["fraudFlags"])
         )
         claim_repository.save_assessment(db, assessment)
 
-        # 7. Update claim with primary image path and ASSESSED status
+        # 8. Update claim status to automated decision and save primary image path and hash
         primary_image_path = assessment_result.get("imagePath")
         claim = claim_repository.update_claim_status(
             db,
             claim_id=claim_id,
-            status="ASSESSED",
-            image_path=primary_image_path
+            status=fraud_result["decision"],
+            image_path=primary_image_path,
+            image_hash=primary_image_hash
         )
 
-        # 8. Record audit logs
+        # 9. Record audit logs for each pipeline stage
         assessment_log = AuditLog(
             claim_id=claim_id,
             event_type="VISION_ASSESSED",
@@ -140,7 +174,8 @@ class ClaimService:
                 "confidence": assessment_result["confidence"],
                 "imageCount": assessment_result.get("imageCount", 1),
                 "imagePaths": assessment_result.get("imagePaths", []),
-                "rawProbability": assessment_result.get("rawProbability")
+                "rawProbability": assessment_result.get("rawProbability"),
+                "imageHash": primary_image_hash
             })
         )
         claim_repository.create_audit_log(db, assessment_log)
@@ -177,7 +212,34 @@ class ClaimService:
             )
             claim_repository.create_audit_log(db, satellite_log)
 
-        # 9. Return complete multimodal claim response
+        fraud_log = AuditLog(
+            claim_id=claim_id,
+            event_type="FRAUD_EVALUATED",
+            actor="SYSTEM",
+            details=json.dumps({
+                "fraudRiskScore": fraud_result["fraudRiskScore"],
+                "fraudRiskLevel": fraud_result["fraudRiskLevel"],
+                "fraudFlags": fraud_result["fraudFlags"],
+                "isDuplicateImage": is_duplicate,
+                "duplicateMatchedClaimId": duplicate_match.claim_id if duplicate_match else None
+            })
+        )
+        claim_repository.create_audit_log(db, fraud_log)
+
+        decision_log = AuditLog(
+            claim_id=claim_id,
+            event_type="DECISION_ISSUED",
+            actor="SYSTEM",
+            details=json.dumps({
+                "decision": fraud_result["decision"],
+                "recommendedPayout": fraud_result["recommendedPayout"],
+                "claimedDamage": claim.claimed_damage,
+                "verifiedGroundTruthDamage": fraud_result["verifiedGroundTruthDamage"]
+            })
+        )
+        claim_repository.create_audit_log(db, decision_log)
+
+        # 10. Return complete multimodal claim response
         return {
             "claimId": claim.claim_id,
             "farmerId": claim.farmer_id,
@@ -188,8 +250,14 @@ class ClaimService:
             "incidentDate": claim.incident_date,
             "fieldBoundary": request.fieldBoundary,
             "imagePath": claim.image_path,
+            "imageHash": primary_image_hash,
             "status": claim.status,
+            "decision": fraud_result["decision"],
             "damageCause": damage_cause,
+            "fraudRiskScore": fraud_result["fraudRiskScore"],
+            "fraudRiskLevel": fraud_result["fraudRiskLevel"],
+            "recommendedPayout": fraud_result["recommendedPayout"],
+            "fraudFlags": fraud_result["fraudFlags"],
             "visualAssessment": {
                 "visualClass": assessment.visual_class,
                 "damageSeverity": assessment.damage_severity,
@@ -202,6 +270,7 @@ class ClaimService:
             },
             "weatherAssessment": weather_assessment,
             "satelliteAssessment": satellite_assessment,
+            "fraudAssessment": fraud_result,
             "createdAt": claim.created_at.isoformat() if claim.created_at else None
         }
 
@@ -222,6 +291,11 @@ class ClaimService:
         claim_data["visualAssessment"] = assessment_data
         claim_data["weatherAssessment"] = assessment_data.get("weatherDetails") if assessment_data else None
         claim_data["satelliteAssessment"] = assessment_data.get("satelliteDetails") if assessment_data else None
+        claim_data["decision"] = assessment_data.get("decision") if assessment_data else claim.status
+        claim_data["fraudRiskScore"] = assessment_data.get("fraudRiskScore") if assessment_data else None
+        claim_data["fraudRiskLevel"] = assessment_data.get("fraudRiskLevel") if assessment_data else None
+        claim_data["recommendedPayout"] = assessment_data.get("recommendedPayout") if assessment_data else None
+        claim_data["fraudFlags"] = assessment_data.get("fraudFlags") if assessment_data else []
         claim_data["auditLogs"] = [log.to_dict() for log in claim.audit_logs]
         return claim_data
 
@@ -233,6 +307,11 @@ class ClaimService:
             latest_assessment = claim_repository.get_latest_assessment(db, claim.claim_id)
             claim_dict = claim.to_dict()
             claim_dict["visualAssessment"] = latest_assessment.to_dict() if latest_assessment else None
+            if latest_assessment:
+                claim_dict["decision"] = latest_assessment.decision
+                claim_dict["fraudRiskScore"] = latest_assessment.fraud_risk_score
+                claim_dict["fraudRiskLevel"] = latest_assessment.fraud_risk_level
+                claim_dict["recommendedPayout"] = latest_assessment.recommended_payout
             results.append(claim_dict)
         return results
 

@@ -71,15 +71,22 @@ class ClaimResponseData(BaseModel):
     cropType: str
     claimedDamage: float
     imagePath: Optional[str] = None
+    imageHash: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     incidentDate: Optional[str] = None
     fieldBoundary: Optional[List[List[float]]] = None
     status: str
+    decision: Optional[str] = None
     damageCause: Optional[str] = None
+    fraudRiskScore: Optional[float] = None
+    fraudRiskLevel: Optional[str] = None
+    recommendedPayout: Optional[float] = None
+    fraudFlags: Optional[List[str]] = None
     visualAssessment: Optional[VisualAssessmentData] = None
     weatherAssessment: Optional[Dict[str, Any]] = None
     satelliteAssessment: Optional[Dict[str, Any]] = None
+    fraudAssessment: Optional[Dict[str, Any]] = None
     createdAt: Optional[str] = None
 
 class StandardResponse(BaseModel):

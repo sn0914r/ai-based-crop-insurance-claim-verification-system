@@ -47,6 +47,8 @@ def init_db():
                 conn.execute(text("ALTER TABLE claims ADD COLUMN incident_date TEXT"))
             if "field_boundary" not in claim_cols:
                 conn.execute(text("ALTER TABLE claims ADD COLUMN field_boundary TEXT"))
+            if "image_hash" not in claim_cols:
+                conn.execute(text("ALTER TABLE claims ADD COLUMN image_hash TEXT"))
 
             # Check claim_assessments columns
             assessment_info = conn.execute(text("PRAGMA table_info(claim_assessments)")).fetchall()
@@ -63,6 +65,16 @@ def init_db():
                 conn.execute(text("ALTER TABLE claim_assessments ADD COLUMN damaged_area_percentage REAL"))
             if "satellite_details" not in assessment_cols:
                 conn.execute(text("ALTER TABLE claim_assessments ADD COLUMN satellite_details TEXT"))
+            if "fraud_risk_score" not in assessment_cols:
+                conn.execute(text("ALTER TABLE claim_assessments ADD COLUMN fraud_risk_score REAL"))
+            if "fraud_risk_level" not in assessment_cols:
+                conn.execute(text("ALTER TABLE claim_assessments ADD COLUMN fraud_risk_level TEXT"))
+            if "decision" not in assessment_cols:
+                conn.execute(text("ALTER TABLE claim_assessments ADD COLUMN decision TEXT"))
+            if "recommended_payout" not in assessment_cols:
+                conn.execute(text("ALTER TABLE claim_assessments ADD COLUMN recommended_payout REAL"))
+            if "fraud_flags" not in assessment_cols:
+                conn.execute(text("ALTER TABLE claim_assessments ADD COLUMN fraud_flags TEXT"))
             conn.commit()
     except Exception:
         pass
