@@ -10,6 +10,7 @@ docs/
 server/data/*
 !server/data/weather_dataset.csv
 *.pkl
+!server/models_saved/xgboost_fraud.pkl
 client-interface-sample
 .vscode
 client-interface
