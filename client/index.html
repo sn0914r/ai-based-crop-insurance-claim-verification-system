@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI and Blockchain-Based Crop Insurance Claim Verification System</title>
+  <meta name="description" content="AI and Blockchain-based multimodal crop insurance claim verification, satellite meteorology analysis, and immutable audit logs." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" type="text/css" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css" />
+  <link rel="stylesheet" type="text/css" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/bold/style.css" />
+  <link rel="stylesheet" href="./vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="css/variables.css?v=7.0" />
+  <link rel="stylesheet" href="css/styles.css?v=7.0" />
+</head>
+<body>
+  <!-- Unified Header & Navigation Bar -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand-section">
+        <a href="#" class="brand-wordmark">
+          <span>AI & Blockchain Based Crop Insurance System</span>
+        </a>
+      </div>
+
+      <!-- Navigation Tabs (Integrated into Single Topbar) -->
+      <nav class="nav-tabs" aria-label="Main Navigation" role="tablist">
+        <button class="tab-button active" data-tab="tabSubmit" role="tab">
+          <i class="ph ph-file-plus"></i>
+          <span>File Field Claim</span>
+        </button>
+        <button class="tab-button" data-tab="tabLookup" role="tab">
+          <i class="ph ph-clock-counter-clockwise"></i>
+          <span>My Claims</span>
+        </button>
+      </nav>
+
+      <div class="header-controls">
+        <div id="healthStatusBadge" class="health-status-badge">
+          <span class="status-dot"></span>
+          <span id="healthStatusText">System Active</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="main-wrapper">
+    <!-- Tab 1: Submit Claim -->
+    <section id="tabSubmit" class="tab-pane active">
+      <div class="page-header-compact">
+        <h1 class="page-title-compact">File a crop-loss claim</h1>
+      </div>
+      <div class="claim-grid">
+        <!-- Left: Form Parameters -->
+        <div class="glass-card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title"><i class="ph ph-plant"></i> Field Loss & Claim Details</h2>
+              <p class="card-subtitle">Enter farmer identification, field plot attributes, and loss estimates</p>
+            </div>
+          </div>
+
+          <form id="claimForm">
+            <!-- Farmer & Crop Details -->
+            <div class="form-section-title"><i class="ph ph-user-circle"></i> 1. Farmer & Crop Identity</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="farmerId">
+                  Farmer ID <span style="color:var(--color-danger)">*</span>
+                </label>
+                <input type="text" id="farmerId" class="form-control" placeholder="e.g. FARM-1024" required value="FARM-1024" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="cropType">
+                  Crop Type <span style="color:var(--color-danger)">*</span>
+                </label>
+                <select id="cropType" class="form-control" required>
+                  <option value="Rice" selected>Rice / Paddy (Kharif)</option>
+                  <option value="Wheat">Wheat (Rabi)</option>
+                  <option value="Maize">Maize / Corn</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="lossDate">Date of Loss</label>
+                <input type="date" id="lossDate" class="form-control" />
+              </div>
+            </div>
+
+            <!-- Damage Severity -->
+            <div class="form-section-title"><i class="ph ph-chart-line-down"></i> 2. Claimed Damage Severity</div>
+            <div class="form-group" style="margin-bottom: 1.5rem;">
+              <label class="form-label" for="claimedDamage">
+                <span>Claimed Damage Percentage</span>
+                <span class="hint">Adjust estimated crop yield loss</span>
+              </label>
+              <div class="range-container">
+                <input type="range" id="claimedDamage" class="range-slider" min="0" max="100" value="65" />
+                <div class="range-numeric-wrapper">
+                  <input type="number" id="claimedDamageInput" class="range-numeric-input" min="0" max="100" value="65" aria-label="Claimed damage percentage" />
+                  <span class="range-numeric-unit">%</span>
+                </div>
+                <span id="claimedDamageValue" style="display: none;">65%</span>
+              </div>
+            </div>
+
+            <!-- Hidden GPS coordinates synchronized with the interactive map workbench below -->
+            <input type="hidden" id="latitude" value="16.5217" />
+            <input type="hidden" id="longitude" value="80.7587" />
+          </form>
+        </div>
+
+        <!-- Right: Crop Image Upload & Presets -->
+        <div class="glass-card">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title"><i class="ph ph-camera"></i> Crop Damage Evidence</h2>
+              <p class="card-subtitle">Upload field photography for leaf and crop loss verification</p>
+            </div>
+          </div>
+
+          <!-- Dropzone -->
+          <div id="imageDropzone" class="dropzone" role="button" tabindex="0">
+            <div class="dropzone-icon"><i class="ph ph-cloud-arrow-up"></i></div>
+            <div class="dropzone-text">Click or drag & drop field photo here</div>
+            <div class="dropzone-hint">Supports JPEG, PNG, WEBP &bull; Max 15MB</div>
+            <input type="file" id="imageFileInput" accept="image/*" style="display: none;" />
+          </div>
+
+          <!-- Image Preview -->
+          <div id="previewWrapper" class="preview-wrapper">
+            <img id="previewImg" class="preview-img" src="" alt="Crop Preview" />
+            <div class="preview-overlay">
+              <span id="previewMeta" class="preview-meta">Image Selected</span>
+              <button type="button" id="btnRemoveImage" class="btn-remove-image"><i class="ph ph-trash"></i> Remove Photo</button>
+            </div>
+          </div>
+
+          <!-- Short Reassurance Line Near Upload -->
+          <div class="upload-reassurance">
+            <i class="ph-bold ph-shield-check"></i>
+            <span>Photos are securely verified against field and weather data.</span>
+          </div>
+
+          <!-- Sample Presets (Subtle Demo Aid) -->
+          <div class="sample-presets">
+            <div class="sample-presets-title">
+              <span>Try a sample claim</span>
+              <span class="sample-demo-tag">Testing</span>
+            </div>
+            <div id="sampleCardsContainer" class="sample-cards-grid">
+              <!-- Populated by samples.js -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section: Interactive Farm Field Boundary & Satellite Map (Rendered normally on the page, not in a modal) -->
+      <div class="glass-card map-workbench-card" id="farmMapSection">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title"><i class="ph ph-map-trifold"></i> 3. Farm Field Boundary & Satellite Location</h2>
+            <p class="card-subtitle">Search your farmland by village name or GPS coordinates, then click on the map to outline your field boundary.</p>
+          </div>
+          <div class="map-header-quick-actions">
+            <button type="button" id="btnToggleMarking" class="btn-location-action">
+              <i class="ph-bold ph-pencil-simple-line" id="markingIcon"></i>
+              <span id="markingStatusText">Activate Marking</span>
+            </button>
+            <button type="button" id="btnSamplePolygon" class="btn-location-action">
+              <i class="ph-bold ph-sparkle"></i>
+              <span>Sample Farm (Andhra Pradesh)</span>
+            </button>
+            <button type="button" id="btnClearPolygon" class="btn-location-action btn-location-danger">
+              <i class="ph-bold ph-trash"></i>
+              <span>Clear Boundary</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Search Toolbar: Name-based and Lat/Lon based -->
+        <div class="map-search-toolbar">
+          <!-- Name Search -->
+          <div class="map-search-group map-search-name-group">
+            <div class="map-search-input-wrapper">
+              <i class="ph ph-magnifying-glass"></i>
+              <input type="text" id="mapSearchName" class="form-control map-search-input" value="Budameru" placeholder="Search village, mandal, district or city (e.g. Budameru, Krishna)..." />
+            </div>
+            <button type="button" id="btnSearchName" class="btn-map-search">
+              <span>Find Place</span>
+            </button>
+          </div>
+
+          <div class="map-search-divider">OR</div>
+
+          <!-- Lat/Lon Search -->
+          <div class="map-search-group map-search-coords-group">
+            <input type="number" id="mapSearchLat" class="form-control map-coord-input" step="0.0001" value="16.5189" placeholder="Lat (16.5189)" />
+            <input type="number" id="mapSearchLon" class="form-control map-coord-input" step="0.0001" value="80.7594" placeholder="Lon (80.7594)" />
+            <button type="button" id="btnGoCoords" class="btn-map-search">
+              <i class="ph ph-crosshair"></i>
+              <span>Go to GPS</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Live Leaflet Map Container -->
+        <div id="fieldMap" class="field-map-container inline-field-map"></div>
+
+        <!-- Real-time Boundary Statistics -->
+        <div class="map-stats-strip">
+          <div class="map-stat-pill">
+            <span class="map-stat-label">Calculated Land Area</span>
+            <strong class="map-stat-value" id="calcAreaHectares">1.51 ha</strong>
+          </div>
+          <div class="map-stat-pill">
+            <span class="map-stat-label">Boundary Vertices</span>
+            <strong class="map-stat-value" id="calcVertexCount">6 points</strong>
+          </div>
+          <div class="map-stat-pill">
+            <span class="map-stat-label">Plot Centroid</span>
+            <strong class="map-stat-value" id="calcCentroidCoords">16.5217° N, 80.7587° E</strong>
+          </div>
+          <div class="map-stat-hint">
+            Sentinel-2 spectral imagery computes NDVI vegetation health drop across this exact land boundary.
+          </div>
+        </div>
+      </div>
+
+      <!-- Submission Action Banner -->
+      <div class="submit-action-banner">
+        <button type="button" id="btnSubmitBottom" class="btn-submit btn-submit-large">
+          <span>Review & Submit Claim</span>
+          <i class="ph-bold ph-arrow-right"></i>
+        </button>
+        <span class="submit-note">Your claim will be verified using multimodal vision, weather, satellite remote sensing, and XGBoost AI.</span>
+      </div>
+
+      <!-- Live Results Dashboard Section -->
+      <section id="resultsContainer" class="results-container">
+        <div class="glass-card">
+          <!-- Decision Hero Banner -->
+          <div id="decisionHero" class="decision-hero decision-REVIEW">
+            <div class="decision-info">
+              <span class="decision-tag">Claim Assessment Result</span>
+              <div id="resultDecisionTitle" class="decision-title">ASSESSING</div>
+              <div id="resultDecisionDesc" class="decision-desc">Detailed evaluation generated below</div>
+            </div>
+            <div id="resultClaimId" class="claim-id-badge">ID: CR---------</div>
+          </div>
+
+          <!-- 3 Score Cards -->
+          <div class="metrics-grid">
+            <!-- Damage Score & AI Confidence Combined -->
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Crop Damage (Visual AI)</span>
+                <i class="ph ph-plant"></i>
+              </div>
+              <div id="resultDamageScore" class="metric-value">--%</div>
+              <div class="progress-bar-bg">
+                <div id="resultDamageBar" class="progress-bar-fill" style="width: 0%;"></div>
+              </div>
+              <div class="metric-footer">
+                <span id="resultPredictedClass">Predicted: N/A</span>
+                <span id="resultConfidence">AI Confidence: --%</span>
+              </div>
+            </div>
+
+            <!-- Fraud Score -->
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Consistency & Integrity</span>
+                <i class="ph ph-shield-check"></i>
+              </div>
+              <div id="resultFraudScore" class="metric-value">0.000</div>
+              <div class="progress-bar-bg">
+                <div id="resultFraudBar" class="progress-bar-fill" style="width: 0%;"></div>
+              </div>
+              <div class="metric-footer">
+                <span id="resultRiskLevel">Risk: Low</span>
+                <span>Threshold: 0.40</span>
+              </div>
+            </div>
+
+            <!-- Weather Consistency -->
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Satellite Weather Consistency</span>
+                <i class="ph ph-cloud-sun"></i>
+              </div>
+              <div id="resultWeatherConsistency" class="metric-value">--%</div>
+              <div class="progress-bar-bg">
+                <div id="resultWeatherBar" class="progress-bar-fill" style="width: 0%;"></div>
+              </div>
+              <div class="metric-footer">
+                <span>Satellite Records</span>
+                <span>Verified Weather Feed</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Executive Summary Callout -->
+          <div id="executiveSummaryBox" class="executive-summary-card">
+            <div class="exec-summary-top">
+              <span class="badge-pill badge-primary">
+                <i class="ph-bold ph-sparkle"></i> Assessment Summary
+              </span>
+              <span id="execSummaryVerdict" class="exec-summary-verdict">Verified Rationale</span>
+            </div>
+            <p id="execSummaryText" class="exec-summary-text">
+              Assessment completed. Multi-source physical evidence aligns with the reported loss.
+            </p>
+          </div>
+
+          <!-- 3-Pillar Evidence Verification Checklist -->
+          <div class="evidence-checklist-block">
+            <div class="checklist-header">
+              <i class="ph-bold ph-shield-check"></i>
+              <span>3-Pillar Evidence Verification</span>
+              <span class="checklist-subtitle">Multi-source validation across field photography, weather stations, and satellite orbits</span>
+            </div>
+            <div class="checklist-grid" id="evidenceChecklistContainer">
+              <!-- Populated dynamically: Pillar 1 (Photo), Pillar 2 (Weather), Pillar 3 (Satellite) -->
+            </div>
+          </div>
+
+          <!-- Collapsible Technical Explainable AI (SHAP) Section -->
+          <div class="technical-xai-section">
+            <button type="button" id="btnToggleTechnicalShap" class="btn-toggle-tech">
+              <span style="display:flex;align-items:center;gap:0.6rem">
+                <i class="ph-bold ph-sliders"></i>
+                <span>View Technical Sensor & SHAP Metrics</span>
+              </span>
+              <i class="ph-bold ph-caret-down" id="caretTechnicalShap"></i>
+            </button>
+            <div id="technicalShapDrawer" class="technical-shap-drawer">
+              <div id="resultInsightsList" class="insights-list">
+                <!-- Technical Tree SHAP factor cards -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Raw JSON Accordion -->
+          <div class="accordion">
+            <div id="jsonAccordionHeader" class="accordion-header">
+              <span style="display:flex;align-items:center;gap:0.4rem"><i class="ph ph-file-code"></i> Inspect Technical Field Data & Assessment Records</span>
+              <i class="ph ph-caret-down"></i>
+            </div>
+            <div id="jsonAccordionContent" class="accordion-content">
+              <pre id="jsonRawOutput"></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <!-- Tab 2: Claim Tracker & Audit Trail -->
+    <section id="tabLookup" class="tab-pane">
+      <div class="glass-card">
+        <div class="card-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
+          <div>
+            <h2 class="card-title"><i class="ph ph-clock-counter-clockwise"></i> My Claims & Status History</h2>
+            <p class="card-subtitle">Review historical claims, automated verifications, and cryptographic audit records</p>
+          </div>
+          <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+            <button type="button" id="btnRefreshClaimsHistory" class="btn-secondary" style="padding:0.5rem 0.85rem; font-size:0.8rem; display:inline-flex; align-items:center; gap:0.4rem;">
+              <i class="ph-bold ph-arrows-clockwise" id="iconRefreshClaims"></i>
+              <span>Refresh Records</span>
+            </button>
+            <button type="button" id="btnClearClaimsHistory" class="btn-secondary" style="padding:0.5rem 0.85rem; font-size:0.8rem; display:inline-flex; align-items:center; gap:0.4rem; color:var(--color-danger); border-color:rgba(231,76,60,0.3);">
+              <i class="ph-bold ph-trash"></i>
+              <span>Clear History</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Recent Inquiries Quick Filter -->
+        <div style="margin-bottom: 1rem;">
+          <span style="font-size:0.8rem; font-weight:600; color:var(--color-text-muted)">Quick Inquiries:</span>
+          <div id="recentClaimsContainer" style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.4rem;"></div>
+        </div>
+
+        <!-- Search Input -->
+        <div class="search-bar-container">
+          <input type="text" id="inputSearchClaimId" class="form-control" placeholder="Enter Claim ID (e.g. CR1789977140996)" />
+          <button type="button" id="btnSearchClaim" class="btn-secondary">
+            <i class="ph ph-magnifying-glass"></i> Search
+          </button>
+        </div>
+
+        <!-- Previous Claims Table Container -->
+        <div class="claims-table-wrapper" style="margin-top: 1.5rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+            <span style="font-size:0.9rem; font-weight:700; color:var(--color-text-main); display:inline-flex; align-items:center; gap:0.4rem;">
+              <i class="ph-bold ph-database"></i> Submitted Claims Register
+            </span>
+            <span id="claimsCountBadge" style="font-size:0.78rem; color:var(--color-text-dim);">Loading records...</span>
+          </div>
+
+          <div class="table-responsive" style="margin-top:0; border:1px solid var(--color-hairline); border-radius:var(--radius-sm); max-height:290px; overflow-y:auto;">
+            <table class="data-table" id="claimsHistoryTable">
+              <thead>
+                <tr>
+                  <th>Claim ID</th>
+                  <th>Filed Date</th>
+                  <th>Farmer</th>
+                  <th>Crop</th>
+                  <th>Claimed Loss</th>
+                  <th>Decision</th>
+                  <th>Payout</th>
+                  <th style="text-align:right">Action</th>
+                </tr>
+              </thead>
+              <tbody id="claimsHistoryTableBody">
+                <tr><td colspan="8" style="text-align:center; padding:1.5rem; color:var(--color-text-dim)"><div class="spinner"></div> Loading claims history...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Selected Claim Dossier & Audit Trail -->
+        <div id="selectedClaimDossier" style="margin-top:1.75rem;">
+          <div id="lookupStatusAlert" class="status-alert" style="display: none;"></div>
+          <div id="claimDossierHeader" style="display: none;"></div>
+
+          <!-- Dossier Details (Executive verdict + 3-pillar verification metrics) -->
+          <div id="dossierDetailsContainer" style="display:none; margin-top:1rem;"></div>
+
+          <!-- Collapsible Audit Trail Section (Hidden by default, expandable on click) -->
+          <div id="timelineSectionWrapper" style="display:none; margin-top:1.5rem;">
+            <button type="button" id="btnToggleAuditTrail" class="btn-toggle-tech">
+              <span style="display:flex; align-items:center; gap:0.6rem;">
+                <i class="ph-bold ph-shield-check" style="color:var(--color-primary);"></i>
+                <span style="font-weight:700;">View Verified Cryptographic Audit Trail</span>
+                <span id="auditEventCountBadge" class="tech-tag" style="text-transform:none; font-weight:600;">0 events</span>
+              </span>
+              <i class="ph-bold ph-caret-down" id="caretAuditTrail"></i>
+            </button>
+
+            <div id="auditTrailDrawer" class="technical-shap-drawer">
+              <!-- Vertical Timeline -->
+              <div id="auditTimeline" class="timeline" style="margin-top:1rem;">
+                <!-- Populated by app.js -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Settings & Simulation Overrides Modal (Internal Admin / Developer Mode) -->
+  <div id="settingsModal" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title"><i class="ph ph-sliders"></i> Internal Simulation Overrides & API Configuration</h3>
+        <button id="btnCloseSettings" class="btn-icon" title="Close" aria-label="Close Settings"><i class="ph ph-x"></i></button>
+      </div>
+
+      <div class="settings-modal-body">
+        <!-- Backend API URL -->
+        <div class="settings-section">
+          <div class="settings-section-title"><i class="ph ph-plugs"></i> <span>Backend API Configuration</span></div>
+          <div class="form-group">
+            <label class="form-label" for="inputApiUrl">API Server Base URL</label>
+            <input type="text" id="inputApiUrl" class="form-control" value="http://localhost:8000" />
+            <span class="hint" style="margin-top:0.3rem">Default: http://localhost:8000</span>
+          </div>
+        </div>
+
+        <!-- Manual Weather & Historical Overrides -->
+        <div class="settings-section">
+          <div class="settings-section-title">
+            <i class="ph ph-sliders"></i>
+            <span>Manual Weather & Historical Overrides</span>
+            <span class="hint" style="font-weight:400; text-transform:none;">(Simulation Testing)</span>
+          </div>
+          <p class="settings-section-desc">
+            In live operations, satellite weather is automatically queried from Open-Meteo using GPS coordinates. Leave these empty to use real-time feeds, or input values below to simulate extreme weather stress or poor yield conditions.
+          </p>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="rainfall">Precipitation (mm)</label>
+              <input type="number" id="rainfall" class="form-control" step="0.1" min="0" placeholder="Auto / e.g. 15.2" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="temperature">Temperature (°C)</label>
+              <input type="number" id="temperature" class="form-control" step="0.1" placeholder="Auto / e.g. 34.5" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="droughtIndex">Drought Index (0-1)</label>
+              <input type="number" id="droughtIndex" class="form-control" step="0.01" min="0" max="1" placeholder="Auto / e.g. 0.45" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="historicalYield">Historical Yield Record</label>
+              <select id="historicalYield" class="form-control">
+                <option value="normal" selected>Normal Yield</option>
+                <option value="variable">Variable Yield</option>
+                <option value="poor">Poor Yield</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="claimFrequency">Past Claims Count</label>
+              <input type="number" id="claimFrequency" class="form-control" min="0" value="1" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="btnSaveSettings" class="btn-submit" style="margin-top: 0; width: auto; padding: 0.75rem 1.85rem; display: inline-flex; align-items: center; gap: 0.5rem;">
+          <i class="ph-bold ph-check"></i>
+          <span>Save Settings & Close</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Claim Review & Confirmation Modal -->
+  <div id="reviewClaimModal" class="modal-backdrop">
+    <div class="modal-card review-modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title"><i class="ph ph-clipboard-text"></i> Review Claim Summary</h3>
+        <button id="btnCloseReview" class="btn-icon" title="Close" aria-label="Close Review"><i class="ph ph-x"></i></button>
+      </div>
+      <div class="modal-body review-modal-body">
+        <p class="review-intro">Please review your crop-loss details before submitting for automated verification and ledger recording:</p>
+
+        <!-- Two-Column Review Overview -->
+        <div class="review-grid">
+          <!-- Left: Loss & Identity Details -->
+          <div class="review-card">
+            <div class="review-card-title"><i class="ph ph-chart-line-down"></i> Estimated Loss & Identity</div>
+            <div class="review-item">
+              <span class="review-label">Farmer ID</span>
+              <strong id="reviewFarmerId" class="review-value">-</strong>
+            </div>
+            <div class="review-item">
+              <span class="review-label">Crop Type</span>
+              <strong id="reviewCropType" class="review-value">-</strong>
+            </div>
+            <div class="review-item">
+              <span class="review-label">Date of Loss</span>
+              <strong id="reviewLossDate" class="review-value">-</strong>
+            </div>
+            <div class="review-item review-damage-highlight">
+              <span class="review-label">Claimed Damage</span>
+              <div class="review-damage-group">
+                <strong id="reviewClaimedDamage" class="review-damage-value">0%</strong>
+                <span class="review-damage-label">Estimated loss</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Photo & Verification Context -->
+          <div class="review-card">
+            <div class="review-card-title"><i class="ph ph-camera"></i> Crop Photo Evidence</div>
+            <div class="review-photo-container">
+              <img id="reviewPhotoPreview" class="review-photo-img" src="" alt="Field Photo Evidence" />
+              <div class="review-photo-badge">
+                <i class="ph-bold ph-check-circle"></i>
+                <span id="reviewPhotoMeta">Field imagery ready</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Weather & Satellite Verification Section -->
+        <div class="review-verification-banner">
+          <div class="review-verification-icon">
+            <i class="ph-bold ph-satellite"></i>
+          </div>
+          <div class="review-verification-details">
+            <div class="review-verification-title">Automated Weather & Field Cross-Referencing</div>
+            <div class="review-verification-desc">
+              Field Coordinates: <strong id="reviewCoordinates">-</strong>
+            </div>
+            <div class="review-verification-status">
+              <i class="ph-bold ph-check"></i>
+              <span>Satellite meteorological records ready for automatic cross-referencing upon submission.</span>
+            </div>
+          </div>
+        </div>
+
+        <p class="review-disclaimer">
+          <i class="ph ph-shield-check"></i>
+          <span>Your submission will be evaluated by the automated multimodal protocol and permanently recorded with audit verification.</span>
+        </p>
+      </div>
+
+      <div class="modal-footer review-modal-footer">
+        <button type="button" id="btnEditClaim" class="btn-location-action">
+          <i class="ph ph-arrow-left"></i>
+          <span>Edit Claim</span>
+        </button>
+        <button type="button" id="btnConfirmSubmitClaim" class="btn-submit" style="margin-top: 0; width: auto; padding: 0.75rem 1.85rem;">
+          <i class="ph-bold ph-check-circle"></i>
+          <span>Confirm & Submit Claim</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- Scripts -->
+  <script src="./vendor/leaflet/leaflet.js"></script>
+  <script src="js/config.js?v=7.0"></script>
+  <script src="js/api.js?v=7.0"></script>
+  <script src="js/samples.js?v=7.0"></script>
+  <script src="js/app.js?v=7.0"></script>
+</body>
+</html>
