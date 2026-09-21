@@ -16,6 +16,9 @@ class SubmitClaimRequest(BaseModel):
     latitude: Optional[float] = Field(None, description="GPS latitude of the agricultural field", example=16.5)
     longitude: Optional[float] = Field(None, description="GPS longitude of the agricultural field", example=80.6)
     incidentDate: Optional[str] = Field(None, description="Disaster or claim date (YYYY-MM-DD)", example="2024-09-02")
+    lossDate: Optional[str] = Field(None, description="Alias for incidentDate sent by client", example="2024-09-02")
+    fieldId: Optional[str] = Field(None, description="Identifier for the plot or field", example="FIELD-778")
+    fieldAreaHectares: Optional[float] = Field(None, description="Calculated plot area in hectares", example=12.5)
     fieldBoundary: Optional[List[List[float]]] = Field(
         None,
         description="List of GPS coordinate pairs [[latitude, longitude], ...] defining the field boundary (at least 3 vertices required)",
@@ -23,9 +26,25 @@ class SubmitClaimRequest(BaseModel):
     )
     image: Optional[str] = Field(None, description="Single base64-encoded crop photograph")
     images: Optional[List[str]] = Field(None, description="List of base64-encoded crop photographs from different angles or field spots")
+    rainfall: Optional[float] = Field(None, description="Simulated or reported rainfall in mm", example=15.0)
+    temperature: Optional[float] = Field(None, description="Simulated or reported temperature in Celsius", example=38.0)
+    droughtIndex: Optional[float] = Field(None, description="Simulated or reported drought index (SPEI)", example=-2.1)
+    historicalYield: Optional[str] = Field(None, description="Historical plot yield level", example="AVERAGE")
+    claimFrequency: Optional[int] = Field(None, description="Claim frequency in past 12 months", example=1)
+    allowDuplicateImages: Optional[bool] = Field(
+        True,
+        description="Boolean setting to allow duplicate/recycled crop photos without raising fraud rejection flags",
+        example=True
+    )
 
     @model_validator(mode="after")
     def validate_request_inputs(self):
+        # Synchronize incidentDate and lossDate aliases
+        if not self.incidentDate and self.lossDate:
+            self.incidentDate = self.lossDate
+        elif not self.lossDate and self.incidentDate:
+            self.lossDate = self.incidentDate
+
         has_single = bool(self.image and len(self.image.strip()) > 0)
         has_multiple = bool(self.images and len(self.images) > 0)
         if not has_single and not has_multiple:
@@ -75,19 +94,35 @@ class ClaimResponseData(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     incidentDate: Optional[str] = None
+    lossDate: Optional[str] = None
+    fieldId: Optional[str] = None
+    fieldAreaHectares: Optional[float] = None
     fieldBoundary: Optional[List[List[float]]] = None
     status: str
     decision: Optional[str] = None
     damageCause: Optional[str] = None
     fraudRiskScore: Optional[float] = None
+    fraudScore: Optional[float] = None
     fraudRiskLevel: Optional[str] = None
+    riskLevel: Optional[str] = None
     recommendedPayout: Optional[float] = None
+    payoutPercentage: Optional[float] = None
+    damageScore: Optional[float] = None
+    damageSeverity: Optional[float] = None
+    confidence: Optional[float] = None
+    predictedClass: Optional[str] = None
+    visualClass: Optional[str] = None
+    weatherConsistency: Optional[float] = None
     fraudFlags: Optional[List[str]] = None
     visualAssessment: Optional[VisualAssessmentData] = None
+    assessment: Optional[Dict[str, Any]] = None
     weatherAssessment: Optional[Dict[str, Any]] = None
     satelliteAssessment: Optional[Dict[str, Any]] = None
     fraudAssessment: Optional[Dict[str, Any]] = None
+    explainableAi: Optional[Dict[str, Any]] = None
+    auditLogs: Optional[List[Dict[str, Any]]] = None
     createdAt: Optional[str] = None
+    updatedAt: Optional[str] = None
 
 class StandardResponse(BaseModel):
     success: bool = True

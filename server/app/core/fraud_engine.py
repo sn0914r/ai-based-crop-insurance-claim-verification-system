@@ -73,7 +73,8 @@ class FraudEngine:
         satellite_damaged_area: Optional[float] = None,
         ndvi_vegetation_drop: Optional[float] = None,
         is_duplicate_image: bool = False,
-        claims_frequency_12m: int = 1
+        claims_frequency_12m: int = 1,
+        allow_duplicate_images: bool = False
     ) -> Dict[str, Any]:
         """
         Evaluates a claim using multimodal AI fusion.
@@ -100,7 +101,7 @@ class FraudEngine:
         else:
             ndvi_drop_val = float(np.clip(0.15 + (sat_area_val / 100.0) * 0.45, 0.0, 1.0))
             
-        duplicate_flag = 1 if is_duplicate_image else 0
+        duplicate_flag = 1 if (is_duplicate_image and not allow_duplicate_images) else 0
         freq_val = max(1, int(claims_frequency_12m))
 
         # Discrepancy gaps
@@ -115,7 +116,7 @@ class FraudEngine:
             flags.append("WEATHER_CONTRADICTION")
         if claimed_val >= 50.0 and sat_area_val < 25.0:
             flags.append("SATELLITE_VEGETATION_CONTRADICTION")
-        if is_duplicate_image:
+        if is_duplicate_image and not allow_duplicate_images:
             flags.append("DUPLICATE_IMAGE_DETECTED")
         if freq_val >= 4:
             flags.append("HIGH_CLAIM_FREQUENCY")
@@ -147,8 +148,8 @@ class FraudEngine:
         else:
             fraud_risk_score = self._heuristic_risk_score(features_dict)
 
-        # Perceptual hash duplicate override: recycled photos always result in high risk
-        if is_duplicate_image:
+        # Perceptual hash duplicate override: recycled photos result in high risk unless duplicate images are permitted
+        if is_duplicate_image and not allow_duplicate_images:
             fraud_risk_score = max(fraud_risk_score, 0.95)
 
         # 4. Delegate to Claim Decision Engine for automated policy decision & payout estimation
@@ -158,7 +159,7 @@ class FraudEngine:
             claimed_damage=claimed_val,
             visual_damage=visual_val,
             satellite_damaged_area=sat_area_val,
-            is_duplicate_image=is_duplicate_image
+            is_duplicate_image=(is_duplicate_image and not allow_duplicate_images)
         )
 
         return {

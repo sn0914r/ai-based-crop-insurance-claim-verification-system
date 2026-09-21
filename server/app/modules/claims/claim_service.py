@@ -17,8 +17,12 @@ from app.core.multimodal_engine import multimodal_engine
 from app.core.image_hash import image_hasher
 from app.core.fraud_engine import fraud_engine
 from app.core.claim_decision_engine import claim_decision_engine
+from app.core.xai_engine import xai_engine
 from app.errors.app_error import AppError
 import app.errors.error_codes as error_codes
+
+# Configurable policy flag: Set to True to allow duplicate/recycled crop photos without fraud penalties
+ALLOW_DUPLICATE_IMAGES: bool = True
 
 class ClaimService:
     """
@@ -77,6 +81,13 @@ class ClaimService:
         images = request.get_image_list()
         assessment_result = ml_provider.assess_crop_images(images, claim_id)
 
+        # Determine whether duplicate images are allowed (request override or system default)
+        allow_duplicates = (
+            request.allowDuplicateImages
+            if request.allowDuplicateImages is not None
+            else ALLOW_DUPLICATE_IMAGES
+        )
+
         # Compute perceptual image hash of the primary photo to check for duplicate recycled images
         primary_image_hash = image_hasher.compute_dhash(images[0])
         duplicate_match = claim_repository.find_duplicate_image(
@@ -88,6 +99,8 @@ class ClaimService:
 
         # Query past claims frequency for this farmer in the last 12 months
         farmer_claim_count = claim_repository.count_farmer_claims_12m(db, request.farmerId.strip())
+        if request.claimFrequency is not None:
+            farmer_claim_count = max(farmer_claim_count, request.claimFrequency)
 
         # 4. Stage 2: Execute weather evaluation & cause classification if location available
         weather_assessment = None
@@ -100,6 +113,14 @@ class ClaimService:
                 longitude=calc_lon,
                 incident_date=incident_dt
             )
+            # Incorporate client scenario / simulation overrides if supplied
+            if request.rainfall is not None:
+                raw_weather["rainfall_mm"] = float(request.rainfall)
+            if request.temperature is not None:
+                raw_weather["temp_max"] = float(request.temperature)
+            if request.droughtIndex is not None:
+                raw_weather["spei_drought_index"] = float(request.droughtIndex)
+
             weather_assessment = weather_engine.evaluate_weather(weather_data=raw_weather)
             fusion_result = multimodal_engine.fuse_assessments(
                 visual_damage=assessment_result["damageSeverity"],
@@ -130,7 +151,8 @@ class ClaimService:
             satellite_damaged_area=satellite_assessment["damagedAreaPercentage"] if satellite_assessment else None,
             ndvi_vegetation_drop=satellite_assessment["ndviDrop"] if satellite_assessment else None,
             is_duplicate_image=is_duplicate,
-            claims_frequency_12m=farmer_claim_count
+            claims_frequency_12m=farmer_claim_count,
+            allow_duplicate_images=allow_duplicates
         )
 
         # 7. Save assessment record combining all 4 stages of evidence
@@ -221,6 +243,7 @@ class ClaimService:
                 "fraudRiskLevel": fraud_result["fraudRiskLevel"],
                 "fraudFlags": fraud_result["fraudFlags"],
                 "isDuplicateImage": is_duplicate,
+                "allowDuplicateImages": allow_duplicates,
                 "duplicateMatchedClaimId": duplicate_match.claim_id if duplicate_match else None
             })
         )
@@ -239,7 +262,29 @@ class ClaimService:
         )
         claim_repository.create_audit_log(db, decision_log)
 
-        # 10. Return complete multimodal claim response
+        # 10. Stage 5: Generate Explainable AI (Tree SHAP) factor breakdown
+        xai_result = xai_engine.explain_claim(
+            feature_vector=fraud_result["featureVector"],
+            decision=fraud_result["decision"]
+        )
+
+        xai_log = AuditLog(
+            claim_id=claim_id,
+            event_type="EXPLAINABILITY_GENERATED",
+            actor="SYSTEM",
+            details=json.dumps({
+                "topDrivers": [d["label"] for d in xai_result["topDrivers"]],
+                "executiveSummary": xai_result["executiveSummary"]
+            })
+        )
+        claim_repository.create_audit_log(db, xai_log)
+
+        # 11. Return complete multimodal claim response
+        weather_score_val = weather_assessment["weatherScore"] if weather_assessment else None
+        sat_area_val = satellite_assessment["damagedAreaPercentage"] if satellite_assessment else None
+        weather_consistency_val = round(sat_area_val if sat_area_val is not None else (weather_score_val if weather_score_val is not None else 80.0), 2)
+        field_area_ha = request.fieldAreaHectares or (satellite_assessment.get("fieldAreaHectares") if satellite_assessment else None)
+
         return {
             "claimId": claim.claim_id,
             "farmerId": claim.farmer_id,
@@ -248,15 +293,29 @@ class ClaimService:
             "latitude": claim.latitude,
             "longitude": claim.longitude,
             "incidentDate": claim.incident_date,
+            "lossDate": claim.incident_date,
+            "fieldId": request.fieldId,
+            "fieldAreaHectares": field_area_ha,
             "fieldBoundary": request.fieldBoundary,
             "imagePath": claim.image_path,
             "imageHash": primary_image_hash,
+            "isDuplicateImage": is_duplicate,
+            "allowDuplicateImages": allow_duplicates,
             "status": claim.status,
             "decision": fraud_result["decision"],
             "damageCause": damage_cause,
             "fraudRiskScore": fraud_result["fraudRiskScore"],
+            "fraudScore": fraud_result["fraudRiskScore"],
             "fraudRiskLevel": fraud_result["fraudRiskLevel"],
+            "riskLevel": fraud_result["fraudRiskLevel"],
             "recommendedPayout": fraud_result["recommendedPayout"],
+            "payoutPercentage": fraud_result["recommendedPayout"],
+            "damageScore": assessment.damage_severity,
+            "damageSeverity": assessment.damage_severity,
+            "confidence": assessment.confidence,
+            "predictedClass": assessment.visual_class,
+            "visualClass": assessment.visual_class,
+            "weatherConsistency": weather_consistency_val,
             "fraudFlags": fraud_result["fraudFlags"],
             "visualAssessment": {
                 "visualClass": assessment.visual_class,
@@ -268,10 +327,27 @@ class ClaimService:
                 "rawProbability": assessment_result.get("rawProbability"),
                 "imagePath": claim.image_path
             },
+            "assessment": {
+                "decision": fraud_result["decision"],
+                "damageScore": assessment.damage_severity,
+                "damageSeverity": assessment.damage_severity,
+                "confidence": assessment.confidence,
+                "predictedClass": assessment.visual_class,
+                "visualClass": assessment.visual_class,
+                "fraudScore": fraud_result["fraudRiskScore"],
+                "fraudRiskScore": fraud_result["fraudRiskScore"],
+                "riskLevel": fraud_result["fraudRiskLevel"],
+                "fraudRiskLevel": fraud_result["fraudRiskLevel"],
+                "recommendedPayout": fraud_result["recommendedPayout"],
+                "payoutPercentage": fraud_result["recommendedPayout"],
+                "weatherConsistency": weather_consistency_val,
+            },
             "weatherAssessment": weather_assessment,
             "satelliteAssessment": satellite_assessment,
             "fraudAssessment": fraud_result,
-            "createdAt": claim.created_at.isoformat() if claim.created_at else None
+            "explainableAi": xai_result,
+            "createdAt": claim.created_at.isoformat() if claim.created_at else None,
+            "updatedAt": claim.updated_at.isoformat() if claim.updated_at else None
         }
 
     @staticmethod
@@ -288,14 +364,47 @@ class ClaimService:
         assessment_data = latest_assessment.to_dict() if latest_assessment else None
 
         claim_data = claim.to_dict()
+        claim_data["lossDate"] = claim.incident_date
         claim_data["visualAssessment"] = assessment_data
+        claim_data["assessment"] = assessment_data
         claim_data["weatherAssessment"] = assessment_data.get("weatherDetails") if assessment_data else None
         claim_data["satelliteAssessment"] = assessment_data.get("satelliteDetails") if assessment_data else None
         claim_data["decision"] = assessment_data.get("decision") if assessment_data else claim.status
         claim_data["fraudRiskScore"] = assessment_data.get("fraudRiskScore") if assessment_data else None
+        claim_data["fraudScore"] = assessment_data.get("fraudRiskScore") if assessment_data else None
         claim_data["fraudRiskLevel"] = assessment_data.get("fraudRiskLevel") if assessment_data else None
+        claim_data["riskLevel"] = assessment_data.get("fraudRiskLevel") if assessment_data else None
         claim_data["recommendedPayout"] = assessment_data.get("recommendedPayout") if assessment_data else None
+        claim_data["payoutPercentage"] = assessment_data.get("recommendedPayout") if assessment_data else None
+        claim_data["damageScore"] = assessment_data.get("damageSeverity") if assessment_data else None
+        claim_data["damageSeverity"] = assessment_data.get("damageSeverity") if assessment_data else None
+        claim_data["confidence"] = assessment_data.get("confidence") if assessment_data else None
+        claim_data["predictedClass"] = assessment_data.get("visualClass") if assessment_data else None
+        claim_data["visualClass"] = assessment_data.get("visualClass") if assessment_data else None
+        claim_data["weatherConsistency"] = (assessment_data.get("damagedAreaPercentage") or assessment_data.get("weatherScore")) if assessment_data else None
         claim_data["fraudFlags"] = assessment_data.get("fraudFlags") if assessment_data else []
+        
+        # Compute on-demand SHAP explanations for claim details view
+        if latest_assessment:
+            try:
+                feat_dict = {
+                    "claimed_damage": claim.claimed_damage,
+                    "visual_damage_severity": latest_assessment.damage_severity,
+                    "weather_score": latest_assessment.weather_score or 50.0,
+                    "weather_hazard_match": 1 if latest_assessment.damage_cause in ["FLOOD", "DROUGHT", "STORM_LODGING"] else 0,
+                    "satellite_damaged_area": latest_assessment.damaged_area_percentage or claim.claimed_damage,
+                    "ndvi_vegetation_drop": 0.35 if (latest_assessment.damaged_area_percentage or 0) > 50 else 0.15,
+                    "visual_vs_claim_gap": round(claim.claimed_damage - latest_assessment.damage_severity, 2),
+                    "satellite_vs_claim_gap": round(claim.claimed_damage - (latest_assessment.damaged_area_percentage or claim.claimed_damage), 2),
+                    "is_duplicate_image": 1 if latest_assessment.fraud_risk_score and latest_assessment.fraud_risk_score >= 0.95 else 0,
+                    "claims_frequency_12m": 1
+                }
+                claim_data["explainableAi"] = xai_engine.explain_claim(feat_dict, decision=latest_assessment.decision)
+            except Exception:
+                claim_data["explainableAi"] = None
+        else:
+            claim_data["explainableAi"] = None
+
         claim_data["auditLogs"] = [log.to_dict() for log in claim.audit_logs]
         return claim_data
 
@@ -306,13 +415,33 @@ class ClaimService:
         for claim in claims:
             latest_assessment = claim_repository.get_latest_assessment(db, claim.claim_id)
             claim_dict = claim.to_dict()
+            claim_dict["lossDate"] = claim.incident_date
             claim_dict["visualAssessment"] = latest_assessment.to_dict() if latest_assessment else None
+            claim_dict["assessment"] = latest_assessment.to_dict() if latest_assessment else None
             if latest_assessment:
                 claim_dict["decision"] = latest_assessment.decision
                 claim_dict["fraudRiskScore"] = latest_assessment.fraud_risk_score
+                claim_dict["fraudScore"] = latest_assessment.fraud_risk_score
                 claim_dict["fraudRiskLevel"] = latest_assessment.fraud_risk_level
+                claim_dict["riskLevel"] = latest_assessment.fraud_risk_level
                 claim_dict["recommendedPayout"] = latest_assessment.recommended_payout
+                claim_dict["payoutPercentage"] = latest_assessment.recommended_payout
+                claim_dict["damageScore"] = latest_assessment.damage_severity
+                claim_dict["damageSeverity"] = latest_assessment.damage_severity
+                claim_dict["confidence"] = latest_assessment.confidence
+                claim_dict["predictedClass"] = latest_assessment.visual_class
+                claim_dict["visualClass"] = latest_assessment.visual_class
+                claim_dict["weatherConsistency"] = latest_assessment.damaged_area_percentage or latest_assessment.weather_score
             results.append(claim_dict)
         return results
+
+    @staticmethod
+    def clear_all_claims(db: Session) -> int:
+        count = db.query(Claim).count()
+        db.query(AuditLog).delete()
+        db.query(ClaimAssessment).delete()
+        db.query(Claim).delete()
+        db.commit()
+        return count
 
 claim_service = ClaimService()

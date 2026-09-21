@@ -5,9 +5,11 @@ __pycache__/
 *.db
 dataset/
 .DS_Store
-client/
 .agent/
 docs/
 server/data/*
 !server/data/weather_dataset.csv
 *.pkl
+client-interface-sample
+.vscode
+client-interface

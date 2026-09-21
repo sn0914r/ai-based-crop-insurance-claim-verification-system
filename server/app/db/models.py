@@ -142,4 +142,5 @@ class AuditLog(Base):
             "actor": self.actor,
             "details": parsed_details,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "createdAt": self.timestamp.isoformat() if self.timestamp else None,
         }

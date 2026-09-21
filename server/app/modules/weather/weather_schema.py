@@ -1,11 +1,23 @@
 from typing import Optional, Any
-from pydantic import BaseModel, Field
+from datetime import datetime
+from pydantic import BaseModel, Field, model_validator
 
 class WeatherVerifyRequest(BaseModel):
     latitude: float = Field(..., description="GPS latitude of the agricultural field", example=16.5)
     longitude: float = Field(..., description="GPS longitude of the agricultural field", example=80.6)
-    incidentDate: str = Field(..., description="Disaster or claim date (YYYY-MM-DD)", example="2024-09-02")
+    incidentDate: Optional[str] = Field(None, description="Disaster or claim date (YYYY-MM-DD)", example="2024-09-02")
+    lossDate: Optional[str] = Field(None, description="Disaster date alias (YYYY-MM-DD)", example="2024-09-02")
     visualDamage: Optional[float] = Field(None, ge=0.0, le=100.0, description="Optional AI visual damage score (0-100) to classify damage cause", example=85.0)
+
+    @model_validator(mode="after")
+    def sync_dates(self):
+        if not self.incidentDate and self.lossDate:
+            self.incidentDate = self.lossDate
+        elif not self.lossDate and self.incidentDate:
+            self.lossDate = self.incidentDate
+        if not self.incidentDate:
+            self.incidentDate = datetime.utcnow().strftime("%Y-%m-%d")
+        return self
 
 class WeatherMetrics(BaseModel):
     rainfallMm: float

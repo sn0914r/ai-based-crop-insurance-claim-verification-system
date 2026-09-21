@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -15,6 +16,7 @@ from app.modules.satellite import satellite_router
 from app.modules.fraud import fraud_router
 from app.core.vision_engine import VisionEngine
 from app.core.fraud_engine import fraud_engine
+from app.core.xai_engine import xai_engine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -43,6 +45,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Fraud model preload notice: {str(e)}")
 
+    # Preload Tree SHAP explainable AI engine
+    try:
+        if xai_engine.booster is not None or xai_engine.model is not None:
+            logger.info("Explainable AI (Tree SHAP) engine initialized successfully.")
+        else:
+            logger.warning("Explainable AI engine initialized with heuristic approximations.")
+    except Exception as e:
+        logger.warning(f"XAI engine preload notice: {str(e)}")
+
     yield
 
     # Shutdown sequence
@@ -55,10 +66,11 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Enable CORS for frontend applications
+# Enable CORS for frontend applications (including VS Code Live Server on port 5500)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5500", "http://127.0.0.1:5500", "http://localhost:8000", "http://127.0.0.1:8000"],
+    allow_origin_regex=r"https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -96,7 +108,7 @@ uploads_path = get_resolved_path(settings.UPLOADS_DIR)
 uploads_path.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads_path)), name="uploads")
 
-# Register routers
+# Register API routers
 app.include_router(claims_router)
 app.include_router(weather_router)
 app.include_router(satellite_router)
@@ -110,10 +122,28 @@ def health_check():
         "environment": settings.ENVIRONMENT
     }
 
-@app.get("/", tags=["System"])
-def root():
-    return {
-        "message": "Crop Insurance AI Assessment API is running.",
-        "docs": "/docs",
-        "health": "/health"
-    }
+# Mount Web Dashboard Frontend at "/"
+client_candidates = [
+    Path("/app/client"),
+    Path(__file__).resolve().parent.parent.parent / "client",
+    Path("client"),
+    Path("../client")
+]
+
+client_mounted = False
+for c_path in client_candidates:
+    if c_path.exists() and (c_path / "index.html").exists():
+        app.mount("/client", StaticFiles(directory=str(c_path), html=True), name="client_subpath")
+        app.mount("/", StaticFiles(directory=str(c_path), html=True), name="client_dashboard")
+        logger.info(f"Mounted Web Dashboard static files from: {c_path}")
+        client_mounted = True
+        break
+
+if not client_mounted:
+    @app.get("/", tags=["System"])
+    def root():
+        return {
+            "message": "Crop Insurance AI Assessment API is running.",
+            "docs": "/docs",
+            "health": "/health"
+        }

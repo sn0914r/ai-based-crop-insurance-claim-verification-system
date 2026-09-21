@@ -9,7 +9,20 @@ class FraudEvaluateRequest(BaseModel):
     satelliteDamagedArea: Optional[float] = Field(None, ge=0.0, le=100.0, description="Sentinel-2 verified damaged field acreage (0-100%)", example=85.0)
     ndviVegetationDrop: Optional[float] = Field(None, ge=0.0, le=1.0, description="Pre- vs Post-disaster NDVI drop (0.0 to 1.0)", example=0.45)
     isDuplicateImage: Optional[bool] = Field(False, description="True if perceptual hash indicates image reuse", example=False)
+    allowDuplicateImages: Optional[bool] = Field(False, description="If True, permits duplicate image without penalization", example=False)
     claimsFrequency12m: Optional[int] = Field(1, ge=1, description="Number of claims filed by farmer in last 12 months", example=1)
+
+class ExplainRequest(BaseModel):
+    featureVector: Optional[Dict[str, float]] = None
+    claimedDamage: Optional[float] = None
+    visualDamage: Optional[float] = None
+    weatherScore: Optional[float] = None
+    weatherHazard: Optional[str] = None
+    satelliteDamagedArea: Optional[float] = None
+    ndviVegetationDrop: Optional[float] = None
+    isDuplicateImage: Optional[bool] = False
+    allowDuplicateImages: Optional[bool] = False
+    claimsFrequency12m: Optional[int] = 1
 
 class FraudAssessmentData(BaseModel):
     fraudRiskScore: float = Field(..., description="Continuous fraud probability from XGBoost model (0.00 to 1.00)")

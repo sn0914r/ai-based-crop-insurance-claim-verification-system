@@ -13,6 +13,7 @@ services:
       - ./run.py:/app/run.py
       - ./models_saved:/app/models_saved
       - ./data:/app/data
+      - ../client:/app/client
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8000}/health"]
       interval: 15s

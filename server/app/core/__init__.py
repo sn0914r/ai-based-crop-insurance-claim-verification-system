@@ -5,6 +5,7 @@ from app.core.satellite_engine import satellite_engine, SatelliteEngine
 from app.core.image_hash import image_hasher, ImageHasher
 from app.core.fraud_engine import fraud_engine, FraudEngine
 from app.core.claim_decision_engine import claim_decision_engine, ClaimDecisionEngine
+from app.core.xai_engine import xai_engine, ExplainableAIEngine
 
 __all__ = [
     "VisionEngine",
@@ -19,5 +20,7 @@ __all__ = [
     "fraud_engine",
     "FraudEngine",
     "claim_decision_engine",
-    "ClaimDecisionEngine"
+    "ClaimDecisionEngine",
+    "xai_engine",
+    "ExplainableAIEngine"
 ]

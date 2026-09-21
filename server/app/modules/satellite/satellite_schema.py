@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, field_validator
+from datetime import datetime
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 class SatelliteVerificationRequest(BaseModel):
     fieldBoundary: List[List[float]] = Field(
@@ -7,15 +8,30 @@ class SatelliteVerificationRequest(BaseModel):
         description="List of GPS coordinate pairs [[latitude, longitude], ...] defining the field boundary (at least 3 vertices required)",
         example=[[16.501, 80.601], [16.505, 80.601], [16.505, 80.607], [16.501, 80.607]]
     )
-    incidentDate: str = Field(
-        ...,
+    incidentDate: Optional[str] = Field(
+        None,
         description="Date of the weather event or disaster (YYYY-MM-DD)",
+        example="2024-09-02"
+    )
+    lossDate: Optional[str] = Field(
+        None,
+        description="Date of the weather event or disaster alias (YYYY-MM-DD)",
         example="2024-09-02"
     )
     cropType: Optional[str] = Field(
         default="crop",
         description="Crop type under cultivation (e.g. rice, wheat, corn)"
     )
+
+    @model_validator(mode="after")
+    def sync_dates(self):
+        if not self.incidentDate and self.lossDate:
+            self.incidentDate = self.lossDate
+        elif not self.lossDate and self.incidentDate:
+            self.lossDate = self.incidentDate
+        if not self.incidentDate:
+            self.incidentDate = datetime.utcnow().strftime("%Y-%m-%d")
+        return self
 
     @field_validator("fieldBoundary")
     @classmethod

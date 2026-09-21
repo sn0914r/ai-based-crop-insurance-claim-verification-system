@@ -55,6 +55,25 @@ def get_claim(
     )
 
 @router.get(
+    "/{claim_id}/audit",
+    response_model=StandardResponse,
+    summary="Get Audit Trail by Claim ID"
+)
+def get_claim_audit_trail(
+    claim_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieves the chronological audit trail events for a claim.
+    """
+    result = claim_service.get_claim_details(db, claim_id)
+    return StandardResponse(
+        success=True,
+        message="Audit trail retrieved successfully.",
+        data=result.get("auditLogs", [])
+    )
+
+@router.get(
     "",
     response_model=StandardResponse,
     summary="List All Claims"
@@ -73,3 +92,22 @@ def list_claims(
         message="Claims retrieved successfully.",
         data=result
     )
+
+@router.delete(
+    "",
+    response_model=StandardResponse,
+    summary="Clear All Historical Claims"
+)
+def clear_claims(
+    db: Session = Depends(get_db)
+):
+    """
+    Clears all claims, assessments, and audit logs.
+    """
+    deleted_count = claim_service.clear_all_claims(db)
+    return StandardResponse(
+        success=True,
+        message=f"Successfully cleared {deleted_count} claim records.",
+        data={"clearedCount": deleted_count}
+    )
+
