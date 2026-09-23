@@ -6,7 +6,6 @@ __pycache__/
 dataset/
 .DS_Store
 .agent/
-docs/
 server/data/*
 !server/data/weather_dataset.csv
 *.pkl
